@@ -241,8 +241,8 @@ export async function handleRequestPasswordReset(
     return jsonResponse({ error: 'Please enter a valid company email address.' }, 400)
   }
 
-  const genericMessage =
-    'If an active VarTa workspace account exists for that email address, password reset instructions have been sent.'
+  const successMessage =
+    'A password reset link and one-time recovery code have been sent to your official email address.'
 
   const { data: employee, error: lookupError } = await supabaseAdmin
     .from('employees')
@@ -254,35 +254,29 @@ export async function handleRequestPasswordReset(
     return jsonResponse({ error: lookupError.message }, 500)
   }
 
-  if (!employee || employee.status === 'inactive') {
-    return jsonResponse({ ok: true, message: genericMessage })
+  if (!employee) {
+    return jsonResponse({ error: 'This account is not registered to this organization.' }, 404)
+  }
+
+  if (employee.status === 'inactive') {
+    return jsonResponse(
+      { error: 'This account is deactivated in this organization. Contact your Super Admin.' },
+      403
+    )
+  }
+
+  if (!employee.auth_user_id || employee.status === 'invited') {
+    return jsonResponse(
+      {
+        error:
+          'This account has not completed registration yet. Use "Verify ID & Set Password" with your Employee ID to create your password.',
+      },
+      400
+    )
   }
 
   const runtimeCfg = await getRuntimeMailConfig(supabaseAdmin)
   const appUrl = (Deno.env.get('APP_URL') || runtimeCfg.app_url || 'http://localhost:5173').replace(/\/+$/, '')
-
-  if (!employee.auth_user_id || employee.status === 'invited') {
-    const setupUrl = employee.is_founding_member ? `${appUrl}/login` : `${appUrl}/register`
-    const inviteHtml = [
-      '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 28px; background: #ffffff; border: 1px solid #E5E8F2; border-radius: 20px;">',
-      '  <span style="display: inline-block; background: #EFF1F8; color: #4D4CEF; border: 1px solid #DFE3F2; font-family: monospace; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 999px;">' + employee.employee_code + '</span>',
-      '  <h2 style="color: #151722; font-size: 22px; font-weight: 700; margin: 12px 0 8px 0;">Activate Your VarTa Password</h2>',
-      '  <p style="color: #454A62; font-size: 14px; line-height: 1.6;">Hello <strong>' + employee.full_name + '</strong>, your employee record has not set up an initial password yet. Use your Employee ID (<code>' + employee.employee_code + '</code>) and email to set your password.</p>',
-      '  <div style="text-align: center; margin: 24px 0;">',
-      '    <a href="' + setupUrl + '" style="display: inline-block; background: #4D4CEF; color: #ffffff; text-decoration: none; font-weight: 600; font-size: 14px; padding: 12px 28px; border-radius: 999px;">Verify ID & Set Password</a>',
-      '    <div style="margin-top: 8px; font-size: 11px; color: #8D92A8;">Direct Link: <a href="' + setupUrl + '" style="color: #4D4CEF;">' + setupUrl + '</a></div>',
-      '  </div>',
-      '</div>',
-    ].join('\n')
-
-    await dispatchMail(supabaseAdmin, runtimeCfg, {
-      to: [employee.email],
-      subject: `Set Up Your VarTa Password (${employee.employee_code})`,
-      html: inviteHtml,
-    })
-
-    return jsonResponse({ ok: true, message: genericMessage })
-  }
 
   const { data: linkData, error: linkErr } = await supabaseAdmin.auth.admin.generateLink({
     type: 'recovery',
@@ -336,5 +330,5 @@ export async function handleRequestPasswordReset(
     )
   }
 
-  return jsonResponse({ ok: true, message: genericMessage })
+  return jsonResponse({ ok: true, message: successMessage })
 }

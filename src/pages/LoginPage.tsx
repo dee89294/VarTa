@@ -96,7 +96,7 @@ export function LoginPage() {
       )
       const msg =
         res?.message ||
-        'If an active workspace account matches that email, a password reset link and code have been sent.'
+        'A password reset link and one-time recovery code have been sent to your official email address.'
       setForgotSentMessage(msg)
       toast({
         type: 'success',
