@@ -1,0 +1,143 @@
+/**
+ * File: src/index.css
+ * Purpose: Global Tailwind CSS v4 import and Soft Lavender-Alabaster SaaS design system tokens
+ *   (cool periwinkle-alabaster backdrop, pure white elevated bento cards, royal indigo `#4D4CEF`,
+ *   orchid violet `#9C65E5`, obsidian charcoal pills `#15161C`, and reduced-motion accessibility rules).
+ * Why required: Establishes the unified light studio theme, gradients, input/select styles,
+ *   and subtle atmospheric shadows shared across all pages and UI components.
+ * Connected files:
+ *   - `src/main.tsx` (imports this stylesheet globally)
+ *   - `index.html` (loads `Inter`, `Plus Jakarta Sans`, and `JetBrains Mono` Google Fonts)
+ *   - All pages and components (`.varta-canvas`, `.varta-card`, `.varta-card-hover`, `.varta-glass`,
+ *     `.varta-well`, `.varta-input`, `.varta-select`)
+ * Impact if modified/removed: Strips colors, shadows, light-theme input contrast, and typography hierarchy.
+ */
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+    --font-display: 'Plus Jakarta Sans', 'Inter', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+    --varta-bg: #F3F4F9;
+    --varta-surface: #FFFFFF;
+    --varta-well: #EFF1F7;
+    --varta-border: rgba(21, 23, 34, 0.07);
+    --varta-ink: #151722;
+    --varta-muted: #7C8299;
+    --varta-indigo: #4D4CEF;
+    --varta-violet: #9C65E5;
+  }
+
+  html {
+    color-scheme: light;
+    font-family: var(--font-sans);
+    background-color: #F3F4F9;
+    color: #151722;
+  }
+
+  h1, h2, h3, h4, .font-display {
+    font-family: var(--font-display);
+  }
+
+  .font-mono {
+    font-family: var(--font-mono);
+  }
+}
+
+/* Custom sleek light scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(226, 229, 240, 0.5);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(140, 146, 172, 0.45);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(77, 76, 239, 0.65);
+}
+
+/* Cool Lavender-Alabaster Workspace Surface Utilities */
+.varta-canvas {
+  background-color: #F3F4F9;
+  background-image:
+    radial-gradient(ellipse 75% 48% at 10% -5%, rgba(77, 76, 239, 0.08), transparent 58%),
+    radial-gradient(ellipse 65% 50% at 92% 6%, rgba(156, 101, 229, 0.10), transparent 55%),
+    radial-gradient(ellipse 55% 40% at 50% 100%, rgba(121, 134, 242, 0.06), transparent 60%);
+}
+
+.varta-card {
+  background-color: #FFFFFF;
+  border: 1px solid rgba(21, 23, 34, 0.065);
+  box-shadow: 0 10px 30px -12px rgba(27, 32, 66, 0.07), 0 1px 3px rgba(27, 32, 66, 0.03);
+}
+
+.varta-card-hover {
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 220ms ease,
+    box-shadow 220ms ease;
+}
+
+.varta-card-hover:hover {
+  transform: translateY(-2px);
+  border-color: rgba(77, 76, 239, 0.25);
+  box-shadow: 0 18px 38px -14px rgba(77, 76, 239, 0.16), 0 4px 10px rgba(27, 32, 66, 0.04);
+}
+
+.varta-glass {
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(18px);
+  border: 1px solid rgba(21, 23, 34, 0.08);
+  box-shadow: 0 16px 40px -14px rgba(22, 26, 56, 0.12);
+}
+
+.varta-well {
+  background-color: #F4F5FA;
+  border: 1px solid #E6E8F2;
+}
+
+.varta-input {
+  background-color: #F5F6FB;
+  border: 1px solid #E2E5F1;
+  color: #151722;
+  transition: border-color 180ms ease, background-color 180ms ease, box-shadow 180ms ease;
+}
+
+.varta-input::placeholder {
+  color: #8E94AA;
+}
+
+.varta-input:focus {
+  outline: none;
+  background-color: #FFFFFF;
+  border-color: #4D4CEF;
+  box-shadow: 0 0 0 3px rgba(77, 76, 239, 0.12);
+}
+
+.varta-select {
+  background-color: #F5F6FB;
+  border: 1px solid #E2E5F1;
+  color: #151722;
+  transition: border-color 180ms ease, background-color 180ms ease;
+}
+
+.varta-select:focus {
+  outline: none;
+  background-color: #FFFFFF;
+  border-color: #4D4CEF;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .varta-card-hover,
+  .varta-card-hover:hover {
+    transition: none;
+    transform: none;
+  }
+}
