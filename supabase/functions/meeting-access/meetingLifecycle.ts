@@ -1,5 +1,5 @@
 import { jsonResponse } from './shared.ts'
-import { buildMeetingInviteHtml, dispatchEmail } from './emailSender.ts'
+import { buildMeetingInviteHtml, dispatchEmail, getAppUrl } from './emailSender.ts'
 
 export async function handleDispatchScheduleInvites(
   supabaseAdmin: any,
@@ -23,7 +23,7 @@ export async function handleDispatchScheduleInvites(
     .filter((e: any) => e && e.status === 'active' && e.email)
     .map((e: any) => e.email)
 
-  const appUrl = (Deno.env.get('APP_URL') || 'http://localhost:5173').replace(/\/+$/, '')
+  const appUrl = await getAppUrl(supabaseAdmin)
   const joinUrl = appUrl + '/meetings/' + meeting.id
 
   const emailHtml = buildMeetingInviteHtml({
@@ -141,7 +141,7 @@ export async function handleInviteParticipants(
     )
   }
 
-  const appUrl = (Deno.env.get('APP_URL') || 'http://localhost:5173').replace(/\/+$/, '')
+  const appUrl = await getAppUrl(supabaseAdmin)
   const joinUrl = appUrl + '/meetings/' + meeting.id
 
   const emailHtml = buildMeetingInviteHtml({

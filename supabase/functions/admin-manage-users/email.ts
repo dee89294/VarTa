@@ -14,6 +14,29 @@ export interface SmtpConfig {
   fromName?: string
 }
 
+interface RuntimeMailConfig {
+  app_url?: string
+  host?: string
+  port?: number
+  user?: string
+  pass?: string
+  secure?: boolean
+  from_email?: string
+  from_name?: string
+}
+
+async function getRuntimeMailConfig(supabaseAdmin: AdminClient): Promise<RuntimeMailConfig> {
+  try {
+    const { data, error } = await supabaseAdmin.rpc('get_smtp_runtime_config')
+    if (!error && data && typeof data === 'object') {
+      return data as RuntimeMailConfig
+    }
+  } catch {
+    // ignore RPC fallback errors
+  }
+  return {}
+}
+
 async function sendViaSmtp(
   to: string[],
   subject: string,
@@ -130,13 +153,30 @@ export async function dispatchSystemEmail(
       .maybeSingle()
 
     const useDbSmtp = Boolean(settings?.smtp_enabled && settings?.smtp_host)
-    const host = useDbSmtp && settings?.smtp_host ? String(settings.smtp_host) : (Deno.env.get('SMTP_HOST') || '')
-    const user = useDbSmtp ? (settings?.smtp_user || undefined) : (Deno.env.get('SMTP_USER') || undefined)
-    const pass = useDbSmtp ? (settings?.smtp_pass || undefined) : (Deno.env.get('SMTP_PASS') || undefined)
-    const port = Number((useDbSmtp ? settings?.smtp_port : Deno.env.get('SMTP_PORT')) || 587)
+    const envHost = Deno.env.get('SMTP_HOST') || ''
+    const runtimeCfg = !useDbSmtp && !envHost ? await getRuntimeMailConfig(supabaseAdmin) : {}
+
+    const host = useDbSmtp && settings?.smtp_host
+      ? String(settings.smtp_host)
+      : envHost || String(runtimeCfg.host || '')
+    const user = useDbSmtp
+      ? (settings?.smtp_user || undefined)
+      : envHost
+        ? (Deno.env.get('SMTP_USER') || undefined)
+        : (runtimeCfg.user || undefined)
+    const pass = useDbSmtp
+      ? (settings?.smtp_pass || undefined)
+      : envHost
+        ? (Deno.env.get('SMTP_PASS') || undefined)
+        : (runtimeCfg.pass || undefined)
+    const port = Number(
+      (useDbSmtp ? settings?.smtp_port : envHost ? Deno.env.get('SMTP_PORT') : runtimeCfg.port) || 587
+    )
     const secure = useDbSmtp
       ? Boolean(settings?.smtp_secure ?? (port === 465))
-      : Deno.env.get('SMTP_SECURE') === 'true' || port === 465
+      : envHost
+        ? Deno.env.get('SMTP_SECURE') === 'true' || port === 465
+        : Boolean(runtimeCfg.secure ?? (port === 465))
 
     dbFromEmail = String(settings?.smtp_from_email || '')
     dbFromName = String(settings?.smtp_from_name || '')
@@ -144,8 +184,10 @@ export async function dispatchSystemEmail(
     const envFromName = Deno.env.get('SMTP_FROM_NAME') || ''
     const fromEmail = useDbSmtp
       ? dbFromEmail || user || envFromEmail || 'invites@varta.io'
-      : envFromEmail || user || dbFromEmail || 'invites@varta.io'
-    const fromName = useDbSmtp ? dbFromName || envFromName || 'VarTa Meetings' : envFromName || dbFromName || 'VarTa Meetings'
+      : envFromEmail || String(runtimeCfg.from_email || '') || user || dbFromEmail || 'invites@varta.io'
+    const fromName = useDbSmtp
+      ? dbFromName || envFromName || 'VarTa Meetings'
+      : envFromName || String(runtimeCfg.from_name || '') || dbFromName || 'VarTa Meetings'
 
     if (host) {
       const smtpRes = await sendViaSmtp(params.to, params.subject, params.html, {
@@ -207,7 +249,9 @@ export async function sendOnboardingEmail(
     mode: 'invited' | 'active'
   }
 ) {
-  const appUrl = (Deno.env.get('APP_URL') || 'http://localhost:5173').replace(/\/+$/, '')
+  const envAppUrl = Deno.env.get('APP_URL')
+  const runtimeAppUrl = envAppUrl ? envAppUrl : (await getRuntimeMailConfig(supabaseAdmin)).app_url
+  const appUrl = (runtimeAppUrl || 'http://localhost:5173').replace(/\/+$/, '')
   const actionUrl = params.mode === 'invited' ? `${appUrl}/register` : `${appUrl}/login`
   const roleLabel = params.intendedRole.replace('_', ' ').toUpperCase()
 
