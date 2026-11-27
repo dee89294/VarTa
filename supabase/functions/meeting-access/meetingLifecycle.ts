@@ -298,7 +298,9 @@ export async function handleTestSmtp(
     ok: dispatchResult.status === 'sent',
     status: dispatchResult.status,
     provider: dispatchResult.provider,
-    message: dispatchResult.status === 'sent' ? 'Test email dispatched successfully' : 'Could not send test email. Check server logs and credentials.',
+    message: dispatchResult.status === 'sent'
+      ? 'Test email dispatched successfully'
+      : (dispatchResult as { message?: string }).message || 'Could not send test email. Check server logs and credentials.',
   })
 }
 

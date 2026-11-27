@@ -21,10 +21,16 @@ async function sendViaSmtp(
   config: SmtpConfig
 ): Promise<{ success: boolean; message: string }> {
   try {
+    const host = config.host.trim()
     const port = config.port || (config.secure ? 465 : 587)
+    const user = config.user?.trim()
+    const rawPass = config.pass
+    const pass = rawPass && host.toLowerCase().includes('gmail') ? rawPass.replace(/\s+/g, '') : rawPass
+    const fromEmail = config.fromEmail.trim()
+
     let conn: Deno.Conn = config.secure
-      ? await Deno.connectTls({ hostname: config.host, port })
-      : await Deno.connect({ hostname: config.host, port })
+      ? await Deno.connectTls({ hostname: host, port })
+      : await Deno.connect({ hostname: host, port })
 
     const encoder = new TextEncoder()
     const decoder = new TextDecoder()
@@ -59,21 +65,21 @@ async function sendViaSmtp(
     if (!config.secure && (ehloRes.includes('STARTTLS') || port === 587)) {
       const tlsRes = await sendCommand('STARTTLS')
       if (tlsRes.startsWith('220')) {
-        conn = await Deno.startTls(conn, { hostname: config.host })
+        conn = await Deno.startTls(conn, { hostname: host })
         ehloRes = await sendCommand('EHLO varta.io')
       }
     }
 
-    if (config.user && config.pass) {
+    if (user && pass) {
       const authRes = await sendCommand('AUTH LOGIN')
       if (!authRes.startsWith('334')) throw new Error('AUTH LOGIN rejected: ' + authRes.trim())
-      const userRes = await sendCommand(btoa(config.user))
+      const userRes = await sendCommand(btoa(user))
       if (!userRes.startsWith('334')) throw new Error('SMTP user rejected: ' + userRes.trim())
-      const passRes = await sendCommand(btoa(config.pass))
+      const passRes = await sendCommand(btoa(pass))
       if (!passRes.startsWith('235')) throw new Error('SMTP auth failed: ' + passRes.trim())
     }
 
-    const mailFromRes = await sendCommand('MAIL FROM:<' + config.fromEmail + '>')
+    const mailFromRes = await sendCommand('MAIL FROM:<' + fromEmail + '>')
     if (!mailFromRes.startsWith('250')) throw new Error('MAIL FROM failed: ' + mailFromRes.trim())
 
     for (const recipient of to) {
@@ -83,7 +89,7 @@ async function sendViaSmtp(
     const dataRes = await sendCommand('DATA')
     if (!dataRes.startsWith('354')) throw new Error('DATA rejected: ' + dataRes.trim())
 
-    const fromHeader = config.fromName ? '"' + config.fromName + '" <' + config.fromEmail + '>' : config.fromEmail
+    const fromHeader = config.fromName ? '"' + config.fromName + '" <' + fromEmail + '>' : fromEmail
     const emailData = [
       'From: ' + fromHeader,
       'To: ' + to.join(', '),
@@ -134,8 +140,12 @@ export async function dispatchSystemEmail(
 
     dbFromEmail = String(settings?.smtp_from_email || '')
     dbFromName = String(settings?.smtp_from_name || '')
-    const fromEmail = dbFromEmail || Deno.env.get('VARTA_INVITE_FROM_EMAIL') || 'invites@varta.io'
-    const fromName = dbFromName || Deno.env.get('SMTP_FROM_NAME') || 'VarTa Meetings'
+    const envFromEmail = Deno.env.get('VARTA_INVITE_FROM_EMAIL') || ''
+    const envFromName = Deno.env.get('SMTP_FROM_NAME') || ''
+    const fromEmail = useDbSmtp
+      ? dbFromEmail || user || envFromEmail || 'invites@varta.io'
+      : envFromEmail || user || dbFromEmail || 'invites@varta.io'
+    const fromName = useDbSmtp ? dbFromName || envFromName || 'VarTa Meetings' : envFromName || dbFromName || 'VarTa Meetings'
 
     if (host) {
       const smtpRes = await sendViaSmtp(params.to, params.subject, params.html, {
