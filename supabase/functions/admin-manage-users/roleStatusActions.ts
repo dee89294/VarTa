@@ -1,7 +1,8 @@
 /**
  * Handlers for `update_role`, `set_status`, and `delete_employee` in `admin-manage-users`.
  */
-import { type AdminClient, jsonResponse } from './shared.ts'
+import { type AdminClient, isFoundingCategory, jsonResponse, type OrgCategory } from './shared.ts'
+import { sendOnboardingEmail } from './email.ts'
 
 export async function handleUpdateRole(
   supabaseAdmin: AdminClient,
@@ -154,4 +155,43 @@ export async function handleDeleteEmployee(
   const { error: empDelErr } = await supabaseAdmin.from('employees').delete().eq('id', employee_id)
   if (empDelErr) return jsonResponse({ error: empDelErr.message }, 400)
   return jsonResponse({ success: true, deleted: true, message: `${emp.full_name} permanently removed.` })
+}
+
+export async function handleSendOnboardingInvite(
+  supabaseAdmin: AdminClient,
+  body: Record<string, unknown>
+): Promise<Response> {
+  const employee_id = String(body.employee_id ?? '')
+  if (!employee_id) return jsonResponse({ error: 'employee_id is required' }, 400)
+
+  const { data: emp, error: empErr } = await supabaseAdmin
+    .from('employees')
+    .select('*')
+    .eq('id', employee_id)
+    .single()
+
+  if (empErr || !emp) return jsonResponse({ error: 'Employee not found' }, 404)
+  if (emp.status === 'inactive') {
+    return jsonResponse({ error: 'Reactivate this employee before sending onboarding email.' }, 400)
+  }
+  if (emp.is_founding_member || isFoundingCategory((emp.org_category || 'employee') as OrgCategory)) {
+    return jsonResponse({ error: 'Founding leadership members do not use /register AIPL self-setup.' }, 400)
+  }
+
+  const mode = emp.auth_user_id ? 'active' : 'invited'
+  const emailRes = await sendOnboardingEmail(supabaseAdmin, {
+    toEmail: String(emp.email),
+    fullName: String(emp.full_name),
+    employeeCode: String(emp.employee_code),
+    designation: String(emp.designation || 'Team Member'),
+    intendedRole: String(emp.intended_role || 'employee'),
+    mode,
+  })
+
+  return jsonResponse({
+    ok: emailRes.status === 'sent',
+    email_status: emailRes.status,
+    email_provider: emailRes.provider,
+    mode,
+  })
 }

@@ -14,6 +14,7 @@ import {
   syncSocialLinks,
   toLegacyCategory,
 } from './shared.ts'
+import { sendOnboardingEmail } from './email.ts'
 
 export async function handleCreateEmployee(
   supabaseAdmin: AdminClient,
@@ -128,11 +129,39 @@ export async function handleCreateEmployee(
       return jsonResponse({ error: prov.error }, 400)
     }
 
+    const emailRes = await sendOnboardingEmail(supabaseAdmin, {
+      toEmail: email,
+      fullName: full_name,
+      employeeCode: employee_code,
+      designation,
+      intendedRole: intended_role,
+      mode: 'active',
+    })
+
     return jsonResponse({
       employee: { ...insertedEmp, auth_user_id: prov.userId },
       mode: 'active',
+      email_status: emailRes.status,
+      email_provider: emailRes.provider,
     })
   }
 
-  return jsonResponse({ employee: insertedEmp, mode: initialStatus })
+  let emailRes: { status: string; provider: string } = { status: 'skipped', provider: 'none' }
+  if (initialStatus === 'invited' && !foundingMember) {
+    emailRes = await sendOnboardingEmail(supabaseAdmin, {
+      toEmail: email,
+      fullName: full_name,
+      employeeCode: employee_code,
+      designation,
+      intendedRole: intended_role,
+      mode: 'invited',
+    })
+  }
+
+  return jsonResponse({
+    employee: insertedEmp,
+    mode: initialStatus,
+    email_status: emailRes.status,
+    email_provider: emailRes.provider,
+  })
 }

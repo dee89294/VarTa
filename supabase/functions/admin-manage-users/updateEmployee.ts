@@ -14,6 +14,7 @@ import {
   syncSocialLinks,
   toLegacyCategory,
 } from './shared.ts'
+import { sendOnboardingEmail } from './email.ts'
 
 export async function handleUpdateEmployee(
   supabaseAdmin: AdminClient,
@@ -174,6 +175,15 @@ export async function handleUpdateEmployee(
       rollbackEmployeeOnAuthFailure: false,
     })
     if (prov.error) return jsonResponse({ error: prov.error }, 400)
+
+    await sendOnboardingEmail(supabaseAdmin, {
+      toEmail: nextEmail,
+      fullName: nextName,
+      employeeCode: nextCode,
+      designation: nextDesignation,
+      intendedRole: nextRole,
+      mode: 'active',
+    })
   }
 
   return jsonResponse({ employee: updated })

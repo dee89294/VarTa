@@ -10,7 +10,7 @@
  *   - `supabase/functions/admin-manage-users/index.ts` (`update_role`, `set_status`, `delete_employee`)
  */
 import { useMemo, useState } from 'react'
-import { Edit3, Mail, Power, Search, Trash2, UserPlus } from 'lucide-react'
+import { Edit3, Mail, Power, Send, Search, Trash2, UserPlus } from 'lucide-react'
 import { invokeEdgeFunction } from '../../lib/supabase'
 import { useToast } from '../../contexts/ToastContext'
 import { formatDate } from '../../lib/utils'
@@ -108,6 +108,34 @@ export function EmployeeManagementPanel({
       toast({
         type: 'error',
         title: 'Delete failed',
+        description: err instanceof Error ? err.message : 'Error',
+      })
+    }
+  }
+
+  const handleSendInvite = async (emp: Employee) => {
+    try {
+      const res = await invokeEdgeFunction<{ ok: boolean; email_status?: string; email_provider?: string }>(
+        'admin-manage-users',
+        { action: 'send_onboarding_invite', employee_id: emp.id }
+      )
+      if (res.ok) {
+        toast({
+          type: 'success',
+          title: 'Onboarding Email Sent',
+          description: `Sent Employee ID (${emp.employee_code}) & password setup link to ${emp.email} via ${res.email_provider}.`,
+        })
+      } else {
+        toast({
+          type: 'warning',
+          title: 'Email Provider Not Configured',
+          description: `Configure SMTP in Settings or add RESEND_API_KEY in Supabase Secrets to email ${emp.email}.`,
+        })
+      }
+    } catch (err) {
+      toast({
+        type: 'error',
+        title: 'Could not send invite email',
         description: err instanceof Error ? err.message : 'Error',
       })
     }
@@ -260,6 +288,15 @@ export function EmployeeManagementPanel({
                   {!compact && <td className="py-3 px-4 text-[#6E748C]">{formatDate(emp.date_of_joining)}</td>}
                   <td className="py-3 px-4">
                     <div className="flex items-center justify-end gap-1">
+                      {emp.status === 'invited' && !isFoundingMember(emp) && (
+                        <button
+                          onClick={() => handleSendInvite(emp)}
+                          title="Email Employee ID & /register Password Setup Link"
+                          className="p-1.5 rounded-full bg-[#F4F5FA] hover:bg-[#4D4CEF]/10 text-[#4D4CEF]"
+                        >
+                          <Send className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                       <button
                         onClick={() => onEditEmployee(emp)}
                         title="Edit Employee"

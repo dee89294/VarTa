@@ -153,10 +153,6 @@ export function SettingsPage() {
   }
 
   const handleTestSmtp = async () => {
-    if (!settings?.smtp_host && !settings?.smtp_enabled) {
-      toast({ type: 'warning', title: 'Configure SMTP host first', description: 'Enter SMTP server details and check enable.' })
-      return
-    }
     setTestingSmtp(true)
     try {
       const res = await invokeEdgeFunction<{ ok: boolean; message?: string }>('meeting-access', {

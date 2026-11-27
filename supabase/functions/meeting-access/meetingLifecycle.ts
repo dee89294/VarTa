@@ -23,7 +23,7 @@ export async function handleDispatchScheduleInvites(
     .filter((e: any) => e && e.status === 'active' && e.email)
     .map((e: any) => e.email)
 
-  const appUrl = Deno.env.get('APP_URL') || 'http://localhost:5173'
+  const appUrl = (Deno.env.get('APP_URL') || 'http://localhost:5173').replace(/\/+$/, '')
   const joinUrl = appUrl + '/meetings/' + meeting.id
 
   const emailHtml = buildMeetingInviteHtml({
@@ -141,7 +141,7 @@ export async function handleInviteParticipants(
     )
   }
 
-  const appUrl = Deno.env.get('APP_URL') || 'http://localhost:5173'
+  const appUrl = (Deno.env.get('APP_URL') || 'http://localhost:5173').replace(/\/+$/, '')
   const joinUrl = appUrl + '/meetings/' + meeting.id
 
   const emailHtml = buildMeetingInviteHtml({
@@ -234,20 +234,20 @@ export async function handleCancelMeeting(
 
   const cancelHtml = '<div style="font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #E5E8F2; border-radius: 16px; background: #ffffff;">' +
     '<div style="border-bottom: 2px solid #F03E3E; padding-bottom: 12px; margin-bottom: 16px;">' +
-      '<h2 style="color: #F03E3E; margin: 0; font-size: 20px;">Meeting Cancelled</h2>' +
-      '<p style="color: #6E748C; font-size: 13px; margin: 4px 0 0;">Notice from ' + callerEmp.full_name + '</p>' +
+    '<h2 style="color: #F03E3E; margin: 0; font-size: 20px;">Meeting Cancelled</h2>' +
+    '<p style="color: #6E748C; font-size: 13px; margin: 4px 0 0;">Notice from ' + callerEmp.full_name + '</p>' +
     '</div>' +
     '<p style="color: #151722; font-size: 15px; line-height: 1.5;">' +
-      'The scheduled meeting <strong>' + meeting.title + '</strong> (<code>' + meeting.meeting_code + '</code>) has been cancelled by the host.' +
+    'The scheduled meeting <strong>' + meeting.title + '</strong> (<code>' + meeting.meeting_code + '</code>) has been cancelled by the host.' +
     '</p>' +
     '<div style="background: #F8F9FD; border-radius: 12px; padding: 14px; margin: 16px 0; font-size: 13px; color: #454A62;">' +
-      '<div><strong>Originally Scheduled:</strong> ' + meeting.scheduled_start + '</div>' +
-      '<div><strong>Host:</strong> ' + callerEmp.full_name + '</div>' +
+    '<div><strong>Originally Scheduled:</strong> ' + meeting.scheduled_start + '</div>' +
+    '<div><strong>Host:</strong> ' + callerEmp.full_name + '</div>' +
     '</div>' +
     '<p style="color: #8D92A8; font-size: 11px; margin-top: 24px; border-top: 1px solid #EEF0F7; padding-top: 12px;">' +
-      'VarTa Enterprise Meetings • Automated Notification' +
+    'VarTa Enterprise Meetings • Automated Notification' +
     '</p>' +
-  '</div>'
+    '</div>'
 
   await dispatchEmail({
     supabaseAdmin,
@@ -281,11 +281,11 @@ export async function handleTestSmtp(
     '<h2 style="color: #4D4CEF; margin-top: 0;">VarTa SMTP Test Successful</h2>' +
     '<p style="color: #151722; font-size: 14px;">Your SMTP configuration is active and able to transmit email notifications.</p>' +
     '<div style="font-size: 12px; color: #6E748C; background: #F8F9FD; padding: 12px; border-radius: 8px; margin-top: 16px;">' +
-      '<div><strong>Tested At:</strong> ' + new Date().toISOString() + '</div>' +
-      '<div><strong>Recipient:</strong> ' + targetEmail + '</div>' +
-      '<div><strong>Admin:</strong> ' + callerEmp.full_name + ' (' + callerEmp.employee_code + ')</div>' +
+    '<div><strong>Tested At:</strong> ' + new Date().toISOString() + '</div>' +
+    '<div><strong>Recipient:</strong> ' + targetEmail + '</div>' +
+    '<div><strong>Admin:</strong> ' + callerEmp.full_name + ' (' + callerEmp.employee_code + ')</div>' +
     '</div>' +
-  '</div>'
+    '</div>'
 
   const dispatchResult = await dispatchEmail({
     supabaseAdmin,

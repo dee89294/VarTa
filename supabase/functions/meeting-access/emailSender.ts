@@ -133,6 +133,8 @@ export async function dispatchEmail({
 }) {
   if (!to || to.length === 0) return { status: 'skipped', provider: 'none' }
 
+  let dbFromEmail = ''
+  let dbFromName = ''
   try {
     const { data: settings } = await supabaseAdmin
       .from('platform_settings')
@@ -140,15 +142,21 @@ export async function dispatchEmail({
       .eq('id', 1)
       .maybeSingle()
 
-    const host = settings?.smtp_host || Deno.env.get('SMTP_HOST')
-    const user = settings?.smtp_user || Deno.env.get('SMTP_USER')
-    const pass = settings?.smtp_pass || Deno.env.get('SMTP_PASS')
-    const port = Number(settings?.smtp_port || Deno.env.get('SMTP_PORT') || 587)
-    const secure = settings?.smtp_secure ?? (port === 465)
-    const fromEmail = settings?.smtp_from_email || Deno.env.get('VARTA_INVITE_FROM_EMAIL') || 'invites@varta.io'
-    const fromName = settings?.smtp_from_name || 'VarTa Meetings'
+    const useDbSmtp = Boolean(settings?.smtp_enabled && settings?.smtp_host)
+    const host = useDbSmtp ? settings.smtp_host : Deno.env.get('SMTP_HOST')
+    const user = useDbSmtp ? settings?.smtp_user : Deno.env.get('SMTP_USER')
+    const pass = useDbSmtp ? settings?.smtp_pass : Deno.env.get('SMTP_PASS')
+    const port = Number((useDbSmtp ? settings?.smtp_port : Deno.env.get('SMTP_PORT')) || 587)
+    const secure = useDbSmtp
+      ? (settings?.smtp_secure ?? (port === 465))
+      : (Deno.env.get('SMTP_SECURE') === 'true' || port === 465)
 
-    if ((settings?.smtp_enabled !== false) && host) {
+    dbFromEmail = settings?.smtp_from_email || ''
+    dbFromName = settings?.smtp_from_name || ''
+    const fromEmail = dbFromEmail || Deno.env.get('VARTA_INVITE_FROM_EMAIL') || 'invites@varta.io'
+    const fromName = dbFromName || Deno.env.get('SMTP_FROM_NAME') || 'VarTa Meetings'
+
+    if (host) {
       const smtpRes = await sendViaSmtp({
         to,
         subject,
@@ -167,6 +175,9 @@ export async function dispatchEmail({
   const resendKey = Deno.env.get('RESEND_API_KEY')
   if (resendKey) {
     try {
+      const resendFrom =
+        Deno.env.get('VARTA_INVITE_FROM_EMAIL') ||
+        (dbFromEmail ? (dbFromName ? `${dbFromName} <${dbFromEmail}>` : dbFromEmail) : 'VarTa Meetings <invites@varta.io>')
       const emailRes = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: {
@@ -174,7 +185,7 @@ export async function dispatchEmail({
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          from: Deno.env.get('VARTA_INVITE_FROM_EMAIL') || 'VarTa Meetings <invites@varta.io>',
+          from: resendFrom,
           to,
           subject,
           html,

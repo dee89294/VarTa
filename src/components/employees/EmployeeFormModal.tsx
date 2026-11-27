@@ -359,7 +359,11 @@ export function EmployeeFormModal({
               : `${fullName} (${empCode}) saved.`,
         })
       } else {
-        const res = await invokeEdgeFunction<{ mode: string }>('admin-manage-users', {
+        const res = await invokeEdgeFunction<{
+          mode: string
+          email_status?: string
+          email_provider?: string
+        }>('admin-manage-users', {
           action: 'create_employee',
           ...payload,
           create_account_now: willCreateAccountNow,
@@ -377,8 +381,12 @@ export function EmployeeFormModal({
           description: isFoundingSelected
             ? `${fullName} added to Company Leadership (excluded from Employee counts/IDs).`
             : res.mode === 'invited'
-              ? `${fullName} (${empCode}) can now generate their own password on /register using Employee ID ${empCode} & ${email}.`
-              : `${fullName} (${empCode}) saved cleanly.`,
+              ? res.email_status === 'sent'
+                ? `Onboarding email with Employee ID ${empCode} sent to ${email} via ${res.email_provider}.`
+                : `${fullName} (${empCode}) can set their password on /register using Employee ID ${empCode} & ${email}.`
+              : res.email_status === 'sent'
+                ? `${fullName} (${empCode}) activated & welcome email dispatched.`
+                : `${fullName} (${empCode}) saved cleanly.`,
         })
       }
       onClose()

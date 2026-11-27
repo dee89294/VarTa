@@ -6,7 +6,7 @@
 import { corsHeaders, jsonResponse, requireSuperAdmin } from './shared.ts'
 import { handleCreateEmployee } from './createEmployee.ts'
 import { handleUpdateEmployee } from './updateEmployee.ts'
-import { handleDeleteEmployee, handleSetStatus, handleUpdateRole } from './roleStatusActions.ts'
+import { handleDeleteEmployee, handleSendOnboardingInvite, handleSetStatus, handleUpdateRole } from './roleStatusActions.ts'
 
 Deno.serve(async (req: Request) => {
   if (req.method === 'OPTIONS') {
@@ -38,6 +38,9 @@ Deno.serve(async (req: Request) => {
     }
     if (action === 'delete_employee') {
       return await handleDeleteEmployee(supabaseAdmin, callerEmployeeId, body)
+    }
+    if (action === 'send_onboarding_invite') {
+      return await handleSendOnboardingInvite(supabaseAdmin, body)
     }
 
     return jsonResponse({ error: 'Unsupported action' }, 400)
