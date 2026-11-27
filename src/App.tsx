@@ -27,6 +27,7 @@ import { ToastProvider } from './contexts/ToastContext'
 import { AppShell } from './components/layout/AppShell'
 import { LoginPage } from './pages/LoginPage'
 import { RegisterPage } from './pages/RegisterPage'
+import { ResetPasswordPage } from './pages/ResetPasswordPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { EmployeesPage } from './pages/EmployeesPage'
 import { TeamsPage } from './pages/TeamsPage'
@@ -151,6 +152,7 @@ function AnimatedRoutes() {
             </PublicOnlyRoute>
           }
         />
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
 
         <Route
           element={

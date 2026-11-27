@@ -17,6 +17,7 @@
  * Impact if modified/removed: Self-service employee onboarding breaks or loses server-side HR record verification.
  */
 import { createClient } from 'npm:@supabase/supabase-js@2.49.4'
+import { handleRequestPasswordReset } from './passwordReset.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -60,16 +61,20 @@ Deno.serve(async (req: Request) => {
     const password = typeof body?.password === 'string' ? body.password : ''
     const phone = typeof body?.phone === 'string' ? body.phone.trim() : undefined
 
+    const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL') ?? '', getSecretKey(), {
+      auth: { autoRefreshToken: false, persistSession: false },
+    })
+
+    if (action === 'request_password_reset') {
+      return await handleRequestPasswordReset(supabaseAdmin, rawEmail, jsonResponse)
+    }
+
     if (!rawCode || !rawEmail) {
       return jsonResponse({ error: 'Employee ID and company email address are required.' }, 400)
     }
     if (!/^AIPL-[0-9]+$/.test(rawCode)) {
       return jsonResponse({ error: 'Employee ID must use format AIPL-(numbers), e.g. AIPL-001.' }, 400)
     }
-
-    const supabaseAdmin = createClient(Deno.env.get('SUPABASE_URL') ?? '', getSecretKey(), {
-      auth: { autoRefreshToken: false, persistSession: false },
-    })
 
     const { data: employee, error: lookupError } = await supabaseAdmin
       .from('employees')
