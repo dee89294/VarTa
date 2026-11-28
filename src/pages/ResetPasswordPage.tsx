@@ -4,7 +4,7 @@
  *   or Supabase Auth recovery session) or manual email + 6-digit recovery OTP code.
  * Connected files:
  *   - `src/App.tsx` (route `/reset-password`)
- *   - `src/pages/LoginPage.tsx` (requests reset link via `employee-registration`)
+ *   - `src/pages/LoginPage.tsx` (requests reset link via `auth-email`)
  *   - `src/lib/supabase.ts` (`supabase.auth.verifyOtp`, `supabase.auth.updateUser`)
  */
 import React, { useEffect, useState } from 'react'
@@ -177,7 +177,7 @@ export function ResetPasswordPage() {
           <p className="text-xs text-[#6E748C] mt-1">
             {tokenHash || hasRecoverySession
               ? 'Your reset link is ready. Choose or generate a strong new password below.'
-              : 'Enter your company email and the one-time code from your reset email.'}
+              : 'Enter your account email and the one-time code from your reset email.'}
           </p>
         </div>
 
@@ -192,7 +192,7 @@ export function ResetPasswordPage() {
             {needsManualOtp && (
               <>
                 <div>
-                  <label className="block text-xs font-semibold text-[#454A62] mb-1.5">Company Email</label>
+                  <label className="block text-xs font-semibold text-[#454A62] mb-1.5">Account Email</label>
                   <div className="relative">
                     <Mail className="h-4 w-4 text-[#8D92A8] absolute left-3.5 top-1/2 -translate-y-1/2" />
                     <input
@@ -200,7 +200,7 @@ export function ResetPasswordPage() {
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      placeholder="name@varta.io"
+                      placeholder="you@example.com"
                       className="varta-input w-full pl-10 pr-4 py-2.5 rounded-2xl text-sm"
                     />
                   </div>

@@ -97,10 +97,42 @@ export function getAvatarGradient(seed?: string | null): string {
   return palettes[hash % palettes.length]
 }
 
-/** Generates a human-readable unique meeting code (`VRT-XXXX`) used when scheduling new meetings. */
-export function generateMeetingCode(): string {
-  const num = Math.floor(1000 + Math.random() * 9000)
-  return `VRT-${num}`
+/**
+ * Safely validates an internal post-auth redirect target so external open-redirects are blocked
+ * while preserving original `/meeting/<id>?token=...` invite paths across Login & Sign Up.
+ */
+export function sanitizeRedirectPath(raw: string | null, fallback = '/dashboard'): string {
+  if (!raw) return fallback
+  const trimmed = raw.trim()
+  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) return fallback
+  return trimmed
+}
+
+/**
+ * Parses either a full VARTA invitation link (e.g. `https://domain.com/meeting/vrt-12ab?token=...`)
+ * or a plain meeting code / UUID into an internal `/meeting/...` route path preserving query tokens.
+ */
+export function parseMeetingTarget(rawInput: string): string | null {
+  const trimmed = rawInput.trim()
+  if (!trimmed) return null
+
+  if (/^https?:\/\//i.test(trimmed)) {
+    try {
+      const parsed = new URL(trimmed)
+      const match = parsed.pathname.match(/\/meetings?\/([^/]+)/i)
+      if (!match?.[1]) return null
+      return `/meeting/${match[1]}${parsed.search}`
+    } catch {
+      return null
+    }
+  }
+
+  if (trimmed.startsWith('/')) {
+    const match = trimmed.match(/^\/meetings?\/([^/?]+)(\?.*)?$/i)
+    return match?.[1] ? `/meeting/${match[1]}${match[2] ?? ''}` : null
+  }
+
+  return `/meeting/${encodeURIComponent(trimmed)}`
 }
 
 /** Generates a strong randomized password mixing uppercase, lowercase, digits, and symbols. */
