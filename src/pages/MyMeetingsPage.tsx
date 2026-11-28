@@ -161,7 +161,9 @@ export function MyMeetingsPage() {
 
     setSendingInvites(true)
     try {
-      const res = await invokeEdgeFunction<{ invitation_results: Array<{ email: string; status: string }> }>(
+      const res = await invokeEdgeFunction<{
+        invitation_results: Array<{ email: string; status: string; error?: string }>
+      }>(
         'meeting-invitations',
         {
           action: 'send_invitations',
@@ -170,10 +172,14 @@ export function MyMeetingsPage() {
         }
       )
       const sent = (res.invitation_results ?? []).filter((r) => r.status === 'sent').length
+      const firstErr = (res.invitation_results ?? []).find((r) => r.status !== 'sent' && r.error)?.error
       toast({
-        type: 'success',
-        title: 'Invitations Sent',
-        description: `Dispatched ${sent}/${emails.length} invitation email(s).`,
+        type: sent < emails.length ? 'warning' : 'success',
+        title: sent < emails.length ? 'Some Invitations Failed' : 'Invitations Sent',
+        description:
+          sent < emails.length && firstErr
+            ? `Dispatched ${sent}/${emails.length} emails. ${firstErr}`
+            : `Dispatched ${sent}/${emails.length} invitation email(s).`,
       })
       setInviteModalMeeting(null)
       setExtraEmailsInput('')

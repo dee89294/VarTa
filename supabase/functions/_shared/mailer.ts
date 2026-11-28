@@ -147,14 +147,28 @@ export async function dispatchVartaEmail(
   if (!params.to.length) return { status: 'not_configured', provider: 'none' }
 
   const runtimeCfg = await getRuntimeMailConfig(supabaseAdmin)
+  const useDbCfg = Boolean(runtimeCfg.host && runtimeCfg.pass)
   const envHost = Deno.env.get('SMTP_HOST') || ''
-  const host = envHost || String(runtimeCfg.host || '')
-  const user = envHost ? (Deno.env.get('SMTP_USER') || undefined) : (runtimeCfg.user || undefined)
-  const pass = envHost ? (Deno.env.get('SMTP_PASS') || undefined) : (runtimeCfg.pass || undefined)
-  const port = Number((envHost ? Deno.env.get('SMTP_PORT') : runtimeCfg.port) || 587)
-  const secure = envHost ? Deno.env.get('SMTP_SECURE') === 'true' || port === 465 : Boolean(runtimeCfg.secure ?? (port === 465))
-  const fromEmail = Deno.env.get('VARTA_INVITE_FROM_EMAIL') || String(runtimeCfg.from_email || '') || user || 'invites@varta.io'
-  const fromName = Deno.env.get('SMTP_FROM_NAME') || String(runtimeCfg.from_name || '') || 'VarTa Meetings'
+  const host = useDbCfg ? String(runtimeCfg.host || '') : envHost || String(runtimeCfg.host || '')
+  const user = useDbCfg ? (runtimeCfg.user || undefined) : envHost ? (Deno.env.get('SMTP_USER') || undefined) : (runtimeCfg.user || undefined)
+  const pass = useDbCfg ? (runtimeCfg.pass || undefined) : envHost ? (Deno.env.get('SMTP_PASS') || undefined) : (runtimeCfg.pass || undefined)
+  const port = Number((useDbCfg ? runtimeCfg.port : envHost ? Deno.env.get('SMTP_PORT') : runtimeCfg.port) || 587)
+  const secure = useDbCfg
+    ? Boolean(runtimeCfg.secure ?? (port === 465))
+    : envHost
+      ? Deno.env.get('SMTP_SECURE') === 'true' || port === 465
+      : Boolean(runtimeCfg.secure ?? (port === 465))
+  const fromEmail =
+    (useDbCfg ? String(runtimeCfg.from_email || '') : '') ||
+    Deno.env.get('VARTA_INVITE_FROM_EMAIL') ||
+    String(runtimeCfg.from_email || '') ||
+    user ||
+    'invites@varta.io'
+  const fromName =
+    (useDbCfg ? String(runtimeCfg.from_name || '') : '') ||
+    Deno.env.get('SMTP_FROM_NAME') ||
+    String(runtimeCfg.from_name || '') ||
+    'VarTa Meetings'
 
   let lastErr = ''
   if (host) {

@@ -160,12 +160,15 @@ export function CreateMeetingPage() {
       })
 
       const sentCount = (res.invitation_results ?? []).filter((r) => r.status === 'sent').length
+      const firstFailError = (res.invitation_results ?? []).find((r) => r.status !== 'sent' && r.error)?.error
       toast({
-        type: 'success',
+        type: finalEmails.length > 0 && sentCount < finalEmails.length ? 'warning' : 'success',
         title: 'Meeting Created',
         description:
           finalEmails.length > 0
-            ? `Dispatched ${sentCount}/${finalEmails.length} email invitation(s).`
+            ? sentCount < finalEmails.length && firstFailError
+              ? `Dispatched ${sentCount}/${finalEmails.length} emails. ${firstFailError}`
+              : `Dispatched ${sentCount}/${finalEmails.length} email invitation(s).`
             : 'Secure meeting link is ready to copy or share.',
       })
     } catch (err) {
@@ -293,18 +296,21 @@ export function CreateMeetingPage() {
                 {createdResult.deliveries.map((d) => (
                   <div
                     key={d.email}
-                    className="px-3.5 py-2.5 rounded-2xl bg-[#F8F9FD] border border-[#E7E9F4] flex items-center justify-between gap-2 text-xs"
+                    className="px-3.5 py-2.5 rounded-2xl bg-[#F8F9FD] border border-[#E7E9F4] space-y-1 text-xs"
                   >
-                    <span className="truncate font-medium text-[#151722]">{d.email}</span>
-                    <span
-                      className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        d.status === 'sent'
-                          ? 'bg-emerald-50 text-emerald-700'
-                          : 'bg-amber-50 text-amber-700'
-                      }`}
-                    >
-                      {d.status === 'sent' ? 'Sent' : d.status}
-                    </span>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="truncate font-medium text-[#151722]">{d.email}</span>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                          d.status === 'sent'
+                            ? 'bg-emerald-50 text-emerald-700'
+                            : 'bg-rose-50 text-rose-700'
+                        }`}
+                      >
+                        {d.status === 'sent' ? 'Sent' : d.status}
+                      </span>
+                    </div>
+                    {d.error && <p className="text-[11px] text-rose-600 break-words">{d.error}</p>}
                   </div>
                 ))}
               </div>
