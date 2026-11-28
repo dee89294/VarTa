@@ -176,6 +176,11 @@ export interface MeetingRecord {
   meeting_status: 'scheduled' | 'active' | 'ended' | 'cancelled'
   is_instant: boolean
   waiting_room_enabled: boolean
+  description: string
+  agenda: string
+  discussion_points: string
+  recording_status: 'idle' | 'recording' | 'paused'
+  recording_started_at: string | null
   share_token_hash: string
   scheduled_at: string | null
   started_at: string | null
@@ -193,7 +198,7 @@ export async function findMeetingByIdentifier(
   const query = supabaseAdmin
     .from('meetings')
     .select(
-      'id, meeting_code, meeting_title, organizer_id, meeting_status, is_instant, waiting_room_enabled, share_token_hash, scheduled_at, started_at, ended_at, organizer:profiles!meetings_organizer_id_fkey(id, full_name, email)'
+      'id, meeting_code, meeting_title, organizer_id, meeting_status, is_instant, waiting_room_enabled, description, agenda, discussion_points, recording_status, recording_started_at, share_token_hash, scheduled_at, started_at, ended_at, organizer:profiles!meetings_organizer_id_fkey(id, full_name, email)'
     )
 
   const { data } = isUuid(clean)

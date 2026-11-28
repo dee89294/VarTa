@@ -2,8 +2,9 @@
  * Edge Function: get-livekit-token
  * Purpose: Authorizes organizers, invited registered users, and unauthenticated guests
  *   joining a VarTa meeting, records participation in `public.meeting_participants`,
- *   mints a signed LiveKit Cloud JWT token with server-enforced permissions, and
- *   handles waiting room / leave / organizer-only end meeting actions.
+ *   mints a signed LiveKit Cloud JWT token with server-enforced permissions, handles
+ *   waiting room / leave / organizer-only end meeting & recording controls, and persists
+ *   interactive meeting dashboard state (`summary`, `meeting_tasks`, `meeting_messages`).
  *
  * Security:
  *   - Reads `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` exclusively from
@@ -78,10 +79,190 @@ Deno.serve(async (req: Request) => {
           meeting_title: meeting.meeting_title,
           meeting_status: meeting.meeting_status,
           waiting_room_enabled: meeting.waiting_room_enabled,
+          description: meeting.description,
+          agenda: meeting.agenda,
+          discussion_points: meeting.discussion_points,
+          recording_status: meeting.recording_status,
+          recording_started_at: meeting.recording_started_at,
           scheduled_at: meeting.scheduled_at,
           organizer_name: meeting.organizer?.full_name ?? 'Meeting Host',
         },
       })
+    }
+
+    // Load dashboard workspace (Summary + Tasks List + Room Chat + Recording state)
+    if (action === 'workspace_state') {
+      if (!access.authorized) {
+        return jsonResponse({ error: access.reason }, 403)
+      }
+
+      const [tasksRes, msgsRes] = await Promise.all([
+        supabaseAdmin
+          .from('meeting_tasks')
+          .select('id, meeting_id, title, status, is_completed, assigned_to, due_date, created_by, created_at, updated_at')
+          .eq('meeting_id', meeting.id)
+          .order('created_at', { ascending: true }),
+        supabaseAdmin
+          .from('meeting_messages')
+          .select('id, meeting_id, user_id, participant_identity, sender_name, sender_role, message_text, created_at')
+          .eq('meeting_id', meeting.id)
+          .order('created_at', { ascending: true })
+          .limit(200),
+      ])
+
+      return jsonResponse({
+        can_edit_workspace: Boolean(caller) && access.authorized,
+        summary: {
+          description: meeting.description ?? '',
+          agenda: meeting.agenda ?? '',
+          discussion_points: meeting.discussion_points ?? '',
+        },
+        recording_status: meeting.recording_status ?? 'idle',
+        recording_started_at: meeting.recording_started_at ?? null,
+        tasks: tasksRes.data ?? [],
+        messages: msgsRes.data ?? [],
+      })
+    }
+
+    // Update Meeting Summary (authorized registered/organizer users)
+    if (action === 'update_summary') {
+      if (!access.authorized || !caller) {
+        return jsonResponse({ error: 'Only authorized signed-in participants can edit the meeting summary.' }, 403)
+      }
+
+      const description = String(body.description ?? '').trim()
+      const agenda = String(body.agenda ?? '').trim()
+      const discussionPoints = String(body.discussion_points ?? '').trim()
+
+      const { error: updErr } = await supabaseAdmin
+        .from('meetings')
+        .update({
+          description,
+          agenda,
+          discussion_points: discussionPoints,
+        })
+        .eq('id', meeting.id)
+
+      if (updErr) return jsonResponse({ error: updErr.message }, 500)
+      return jsonResponse({
+        ok: true,
+        summary: { description, agenda, discussion_points: discussionPoints },
+      })
+    }
+
+    // Create / Update Task (authorized registered/organizer users)
+    if (action === 'upsert_task') {
+      if (!access.authorized || !caller) {
+        return jsonResponse({ error: 'Only authorized signed-in participants can modify meeting tasks.' }, 403)
+      }
+
+      const taskId = String(body.task_id ?? '').trim()
+      const title = String(body.title ?? '').trim()
+      if (!title) return jsonResponse({ error: 'Task title is required.' }, 400)
+
+      const rawStatus = String(body.status ?? 'pending')
+      const isCompleted = body.is_completed !== undefined ? Boolean(body.is_completed) : rawStatus === 'completed'
+      const normalizedStatus = isCompleted
+        ? 'completed'
+        : rawStatus === 'in_progress'
+          ? 'in_progress'
+          : 'pending'
+      const assignedTo = String(body.assigned_to ?? '').trim()
+      const dueDate = body.due_date ? String(body.due_date).slice(0, 10) : null
+
+      if (taskId) {
+        const { data: updated, error: taskErr } = await supabaseAdmin
+          .from('meeting_tasks')
+          .update({
+            title,
+            status: normalizedStatus,
+            is_completed: isCompleted,
+            assigned_to: assignedTo,
+            due_date: dueDate,
+          })
+          .eq('id', taskId)
+          .eq('meeting_id', meeting.id)
+          .select('id, meeting_id, title, status, is_completed, assigned_to, due_date, created_by, created_at, updated_at')
+          .single()
+
+        if (taskErr) return jsonResponse({ error: taskErr.message }, 500)
+        return jsonResponse({ task: updated })
+      }
+
+      const { data: created, error: insertErr } = await supabaseAdmin
+        .from('meeting_tasks')
+        .insert({
+          meeting_id: meeting.id,
+          title,
+          status: normalizedStatus,
+          is_completed: isCompleted,
+          assigned_to: assignedTo,
+          due_date: dueDate,
+          created_by: caller.id,
+        })
+        .select('id, meeting_id, title, status, is_completed, assigned_to, due_date, created_by, created_at, updated_at')
+        .single()
+
+      if (insertErr) return jsonResponse({ error: insertErr.message }, 500)
+      return jsonResponse({ task: created })
+    }
+
+    // Delete Task (authorized registered/organizer users)
+    if (action === 'delete_task') {
+      if (!access.authorized || !caller) {
+        return jsonResponse({ error: 'Only authorized signed-in participants can remove tasks.' }, 403)
+      }
+      const taskId = String(body.task_id ?? '').trim()
+      if (!taskId) return jsonResponse({ error: 'task_id is required.' }, 400)
+
+      const { error: delErr } = await supabaseAdmin
+        .from('meeting_tasks')
+        .delete()
+        .eq('id', taskId)
+        .eq('meeting_id', meeting.id)
+
+      if (delErr) return jsonResponse({ error: delErr.message }, 500)
+      return jsonResponse({ ok: true, deleted_task_id: taskId })
+    }
+
+    // Persist Real-Time Room Chat Message (any admitted organizer, registered user, or verified guest)
+    if (action === 'send_chat') {
+      if (!access.authorized) {
+        return jsonResponse({ error: 'Unauthorized room chat message.' }, 403)
+      }
+      const messageText = String(body.message_text ?? '').trim()
+      const participantIdentity = String(body.participant_identity ?? '').trim()
+      let senderName = String(body.sender_name ?? '').trim()
+
+      if (!messageText) return jsonResponse({ error: 'Message text cannot be empty.' }, 400)
+      if (!participantIdentity) return jsonResponse({ error: 'participant_identity is required.' }, 400)
+
+      if (caller) {
+        const { data: prof } = await supabaseAdmin
+          .from('profiles')
+          .select('full_name')
+          .eq('id', caller.id)
+          .maybeSingle()
+        senderName = prof?.full_name || senderName || String(caller.user_metadata?.full_name || caller.email?.split('@')[0] || 'Participant')
+      } else if (!senderName) {
+        senderName = 'Guest'
+      }
+
+      const { data: msgRow, error: msgErr } = await supabaseAdmin
+        .from('meeting_messages')
+        .insert({
+          meeting_id: meeting.id,
+          user_id: caller?.id ?? null,
+          participant_identity: participantIdentity,
+          sender_name: senderName,
+          sender_role: access.participantType,
+          message_text: messageText,
+        })
+        .select('id, meeting_id, user_id, participant_identity, sender_name, sender_role, message_text, created_at')
+        .single()
+
+      if (msgErr) return jsonResponse({ error: msgErr.message }, 500)
+      return jsonResponse({ message: msgRow })
     }
 
     // Leave recording
@@ -113,8 +294,13 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ ok: true })
     }
 
-    // Organizer-only meeting management actions
-    if (action === 'end_meeting' || action === 'admit_participant' || action === 'remove_participant') {
+    // Organizer-only meeting management actions (`end_meeting`, `admit_participant`, `remove_participant`, `set_recording`)
+    if (
+      action === 'end_meeting' ||
+      action === 'admit_participant' ||
+      action === 'remove_participant' ||
+      action === 'set_recording'
+    ) {
       if (!caller || caller.id !== meeting.organizer_id) {
         return jsonResponse({ error: 'Only the meeting organizer can perform this action.' }, 403)
       }
@@ -123,11 +309,38 @@ Deno.serve(async (req: Request) => {
       const apiKey = Deno.env.get('LIVEKIT_API_KEY') ?? ''
       const apiSecret = Deno.env.get('LIVEKIT_API_SECRET') ?? ''
 
+      if (action === 'set_recording') {
+        const nextStatus = String(body.recording_status ?? 'idle')
+        if (!['idle', 'recording', 'paused'].includes(nextStatus)) {
+          return jsonResponse({ error: 'Invalid recording status.' }, 400)
+        }
+        const startedAt =
+          nextStatus === 'recording'
+            ? meeting.recording_started_at ?? new Date().toISOString()
+            : nextStatus === 'idle'
+              ? null
+              : meeting.recording_started_at
+
+        await supabaseAdmin
+          .from('meetings')
+          .update({
+            recording_status: nextStatus,
+            recording_started_at: startedAt,
+          })
+          .eq('id', meeting.id)
+
+        return jsonResponse({
+          ok: true,
+          recording_status: nextStatus,
+          recording_started_at: startedAt,
+        })
+      }
+
       if (action === 'end_meeting') {
         const nowIso = new Date().toISOString()
         await supabaseAdmin
           .from('meetings')
-          .update({ meeting_status: 'ended', ended_at: nowIso })
+          .update({ meeting_status: 'ended', ended_at: nowIso, recording_status: 'idle' })
           .eq('id', meeting.id)
 
         await supabaseAdmin
@@ -157,7 +370,7 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({ ok: true, admission_status: 'admitted' })
       }
 
-      // Remove participant
+      // Remove / reject participant
       const { data: removedRow } = await supabaseAdmin
         .from('meeting_participants')
         .update({ admission_status: 'removed', left_at: new Date().toISOString() })
@@ -289,6 +502,11 @@ Deno.serve(async (req: Request) => {
           meeting_title: meeting.meeting_title,
           meeting_status: currentStatus,
           waiting_room_enabled: meeting.waiting_room_enabled,
+          description: meeting.description,
+          agenda: meeting.agenda,
+          discussion_points: meeting.discussion_points,
+          recording_status: meeting.recording_status,
+          recording_started_at: meeting.recording_started_at,
           scheduled_at: meeting.scheduled_at,
           organizer_name: meeting.organizer?.full_name ?? 'Meeting Host',
         },
@@ -331,12 +549,18 @@ Deno.serve(async (req: Request) => {
       participant_identity: participantRow.participant_identity,
       participant_type: participantRow.participant_type,
       is_organizer: access.isOrganizer,
+      can_edit_workspace: Boolean(caller) && access.authorized,
       meeting: {
         id: meeting.id,
         meeting_code: meeting.meeting_code,
         meeting_title: meeting.meeting_title,
         meeting_status: currentStatus,
         waiting_room_enabled: meeting.waiting_room_enabled,
+        description: meeting.description,
+        agenda: meeting.agenda,
+        discussion_points: meeting.discussion_points,
+        recording_status: meeting.recording_status,
+        recording_started_at: meeting.recording_started_at,
         scheduled_at: meeting.scheduled_at,
         organizer_name: meeting.organizer?.full_name ?? 'Meeting Host',
       },

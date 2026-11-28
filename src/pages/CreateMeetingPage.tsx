@@ -304,10 +304,12 @@ export function CreateMeetingPage() {
                         className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
                           d.status === 'sent'
                             ? 'bg-emerald-50 text-emerald-700'
-                            : 'bg-rose-50 text-rose-700'
+                            : d.status === 'not_configured'
+                              ? 'bg-amber-50 text-amber-700'
+                              : 'bg-rose-50 text-rose-700'
                         }`}
                       >
-                        {d.status === 'sent' ? 'Sent' : d.status}
+                        {d.status === 'sent' ? 'Sent ✓' : d.status === 'not_configured' ? 'No email configured' : 'failed'}
                       </span>
                     </div>
                     {d.error && <p className="text-[11px] text-rose-600 break-words">{d.error}</p>}

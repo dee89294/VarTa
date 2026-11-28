@@ -41,6 +41,11 @@ interface PreviewMeeting {
   meeting_title: string
   meeting_status: 'scheduled' | 'active' | 'ended' | 'cancelled'
   waiting_room_enabled: boolean
+  description?: string
+  agenda?: string
+  discussion_points?: string
+  recording_status?: 'idle' | 'recording' | 'paused'
+  recording_started_at?: string | null
   scheduled_at: string | null
   organizer_name: string
 }
@@ -55,6 +60,7 @@ interface JoinTokenResponse {
   participant_identity: string
   participant_type: 'organizer' | 'registered' | 'guest'
   is_organizer: boolean
+  can_edit_workspace?: boolean
   meeting: PreviewMeeting
 }
 
@@ -88,6 +94,7 @@ export function MeetingRoomPage() {
   const [livekitUrl, setLivekitUrl] = useState('')
   const [participantId, setParticipantId] = useState('')
   const [participantIdentity, setParticipantIdentity] = useState('')
+  const [canEditWorkspace, setCanEditWorkspace] = useState(false)
   const [shareUrl, setShareUrl] = useState<string | null>(null)
 
   const checkAccess = useCallback(async () => {
@@ -164,6 +171,7 @@ export function MeetingRoomPage() {
 
       setMeeting(res.meeting)
       setIsOrganizer(res.is_organizer)
+      setCanEditWorkspace(Boolean(res.can_edit_workspace ?? res.is_organizer))
       setParticipantId(res.participant_id)
       setParticipantIdentity(res.participant_identity)
 
@@ -257,10 +265,21 @@ export function MeetingRoomPage() {
         meetingId={meeting.id}
         meetingCode={meeting.meeting_code}
         meetingTitle={meeting.meeting_title}
+        organizerName={meeting.organizer_name}
         shareUrl={shareUrl}
+        inviteToken={inviteToken}
+        shareToken={shareToken}
+        participantIdentity={participantIdentity}
         isOrganizer={isOrganizer}
+        canEditWorkspace={canEditWorkspace}
         initialAudio={preMicOn}
         initialVideo={preCamOn}
+        initialSummary={{
+          description: meeting.description ?? '',
+          agenda: meeting.agenda ?? '',
+          discussion_points: meeting.discussion_points ?? '',
+        }}
+        initialRecordingStatus={meeting.recording_status ?? 'idle'}
         onLeave={handleLeave}
         onEndMeeting={handleEndMeeting}
         onDisconnectedByServer={() => {
