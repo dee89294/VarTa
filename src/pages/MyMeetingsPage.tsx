@@ -225,11 +225,10 @@ export function MyMeetingsPage() {
               key={tab}
               type="button"
               onClick={() => setStatusFilter(tab)}
-              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold capitalize transition-all cursor-pointer ${
-                statusFilter === tab
+              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold capitalize transition-all cursor-pointer ${statusFilter === tab
                   ? 'bg-[#4D4CEF] text-white shadow-xs'
                   : 'bg-[#F4F5FA] text-[#5E647B] hover:text-[#151722]'
-              }`}
+                }`}
             >
               {tab}
             </button>
