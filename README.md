@@ -47,7 +47,9 @@ VarTa/
 │   │   └── utils.ts                   # Date formatting, URL sanitization, meeting link parsing
 │   ├── components/
 │   │   ├── layout/AppShell.tsx        # Authenticated header navigation shell
-│   │   ├── meeting/LiveKitRoomView.tsx# Official LiveKit room & media controls
+│   │   ├── meeting/
+│   │   │   ├── LiveKitRoomView.tsx    # Focus, Gallery & Screen Share controller + controls bar
+│   │   │   └── MeetingStageTiles.tsx  # LiveKit camera, screen-share, speaker & role tiles
 │   │   └── ui/                        # Reusable UI primitives (`Avatar`, `Modal`, badges, motion)
 │   └── pages/
 │       ├── HomePage.tsx               # Public landing page

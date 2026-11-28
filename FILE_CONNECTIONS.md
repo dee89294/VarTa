@@ -80,5 +80,4 @@ flowchart LR
    - Submitting Join calls `get-livekit-token` (`action: 'join_token'`), which records participation in `meeting_participants` and either returns `{ status: 'waiting_room' }` (polled / subscribed via Realtime until admitted) or `{ status: 'admitted', token, server_url }`.
 
 4. **Real-Time LiveKit Call Lifecycle**
-   - `LiveKitRoomView.tsx` connects to LiveKit Cloud using the server-minted HS256 JWT (`roomAdmin: isOrganizer`).
-   - Organizers can admit or remove waiting/active participants (`admit_participant`, `remove_participant`) and end the meeting (`end_meeting`), which marks `meetings.meeting_status = 'ended'` and deletes the LiveKit room via `RoomService/DeleteRoom`.
+   - `LiveKitRoomView.tsx` and `MeetingStageTiles.tsx` connect to LiveKit Cloud using the server-minted HS256 JWT (`roomAdmin: isOrganizer`), automatically switch between Screen Share, Click-to-Focus, and Collage Gallery layouts without dropping tracks, highlight active speakers via `useIsSpeaking()`, and allow organizers to admit/remove participants or end the meeting (`RoomService/DeleteRoom`).

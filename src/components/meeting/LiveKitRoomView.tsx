@@ -1,11 +1,18 @@
 /**
  * File: src/components/meeting/LiveKitRoomView.tsx
  * Purpose: Real-time audio/video meeting room powered by official LiveKit Cloud SDK
- *   (`@livekit/components-react` + `livekit-client`). Supports live camera tiles, screen-share
- *   spotlight, participant names, mic/camera/screen controls, organizer admission/removal,
- *   leave meeting, and organizer-only end meeting.
+ *   (`@livekit/components-react` + `livekit-client`). Supports dynamic Screen Share Mode,
+ *   Click-to-Focus Mode, responsive Collage Gallery Mode, real-time active speaker highlights,
+ *   waiting room admission/removal, Leave Meeting, and Organizer End Meeting.
+ *
+ * View Architecture:
+ *   - Uses a single `<LiveKitRoom>` + `<RoomAudioRenderer />` connection at all times.
+ *   - Changing between Focus, Gallery, and Screen Share layouts only alters UI container
+ *     placement — it never unsubscribes tracks or reconnects LiveKit media sessions.
+ *
  * Connected files:
- *   - `src/pages/MeetingRoomPage.tsx` (supplies LiveKit token, serverUrl, and lifecycle callbacks)
+ *   - `src/pages/MeetingRoomPage.tsx` (supplies LiveKit JWT, serverUrl, and lifecycle callbacks)
+ *   - `src/components/meeting/MeetingStageTiles.tsx` (video, screen-share, speaker, and role tiles)
  *   - `supabase/functions/get-livekit-token/index.ts` (admit/remove/leave/end endpoints)
  */
 import { useEffect, useMemo, useRef, useState, type MutableRefObject } from 'react'
@@ -13,18 +20,19 @@ import {
   LiveKitRoom,
   RoomAudioRenderer,
   StartAudio,
-  VideoTrack,
   isTrackReference,
   useLocalParticipant,
   useParticipants,
   useRoomContext,
   useTracks,
 } from '@livekit/components-react'
-import { Track, type Participant } from 'livekit-client'
+import { Track } from 'livekit-client'
 import '@livekit/components-styles'
 import {
   Check,
   Copy,
+  LayoutGrid,
+  Maximize2,
   Mic,
   MicOff,
   MonitorOff,
@@ -43,7 +51,21 @@ import { invokeEdgeFunction, supabase } from '../../lib/supabase'
 import { cn } from '../../lib/utils'
 import { useToast } from '../../contexts/ToastContext'
 import { Avatar } from '../ui/Avatar'
-import type { MeetingParticipant, ParticipantType } from '../../types/database'
+import {
+  MeetingParticipantTile,
+  MeetingScreenShareTile,
+  RoleTag,
+  parseParticipantRole,
+} from './MeetingStageTiles'
+import type { MeetingParticipant } from '../../types/database'
+
+/** Three supported viewing modes matching top header controls. */
+export type MeetingViewMode = 'gallery' | 'focus' | 'screen_share'
+
+/** Tracks which stream occupies the primary viewing area in Focus / Screen Share mode. */
+type FocusedTarget =
+  | { kind: 'screen'; participantIdentity: string }
+  | { kind: 'participant'; participantIdentity: string }
 
 interface LiveKitRoomViewProps {
   serverUrl: string
@@ -60,34 +82,24 @@ interface LiveKitRoomViewProps {
   onDisconnectedByServer: () => void
 }
 
-function parseParticipantRole(p: Participant): ParticipantType {
-  if (!p.metadata) return 'guest'
-  try {
-    const parsed = JSON.parse(p.metadata) as { participantType?: ParticipantType }
-    return parsed.participantType ?? 'guest'
-  } catch {
-    return 'guest'
-  }
+/**
+ * Computes balanced equal-tile responsive grid classes for Gallery Mode
+ * based on total active participant count (`1, 2, 3-4, 5-6, 7-9, 10+`).
+ */
+function getGalleryGridClass(count: number): string {
+  if (count <= 1) return 'grid-cols-1 max-w-5xl mx-auto my-auto [&>*]:h-auto [&>*]:aspect-video [&>*]:max-h-[74vh]'
+  if (count === 2) return 'grid-cols-1 md:grid-cols-2 max-w-6xl mx-auto my-auto md:[&>*]:h-auto md:[&>*]:aspect-video md:[&>*]:max-h-[68vh]'
+  if (count <= 4) return 'grid-cols-1 sm:grid-cols-2 sm:h-full auto-rows-fr'
+  if (count <= 6) return 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 lg:h-full auto-rows-fr'
+  if (count <= 9) return 'grid-cols-2 sm:grid-cols-3 sm:h-full auto-rows-fr'
+  return 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 auto-rows-[minmax(180px,1fr)]'
 }
 
-function RoleTag({ type }: { type: ParticipantType }) {
-  if (type === 'organizer') {
-    return (
-      <span className="px-2 py-0.5 rounded-full bg-[#4D4CEF] text-white text-[10px] font-bold">
-        Host
-      </span>
-    )
-  }
-  if (type === 'guest') {
-    return (
-      <span className="px-2 py-0.5 rounded-full bg-[#9C65E5]/20 text-purple-100 text-[10px] font-semibold">
-        Guest
-      </span>
-    )
-  }
-  return null
-}
-
+/**
+ * Inner room controller rendered inside `<LiveKitRoom>`.
+ * Reads real-time participant, active speaker, camera, and screen-share state directly from
+ * LiveKit hooks (`useParticipants`, `useTracks`, `useLocalParticipant`, `useRoomContext`).
+ */
 function LiveKitStageInner({
   meetingId,
   meetingCode,
@@ -112,13 +124,19 @@ function LiveKitStageInner({
   const participants = useParticipants()
   const { localParticipant, isMicrophoneEnabled, isCameraEnabled, isScreenShareEnabled } = useLocalParticipant()
 
+  // Real-time LiveKit screen-share publications (both local presenter and remote viewers)
   const screenTracks = useTracks([{ source: Track.Source.ScreenShare, withPlaceholder: false }], {
     onlySubscribed: false,
   }).filter(isTrackReference)
 
+  // Real-time camera publications + placeholders for camera-off participants
   const cameraTracks = useTracks([{ source: Track.Source.Camera, withPlaceholder: true }], {
     onlySubscribed: false,
   })
+
+  const [viewMode, setViewMode] = useState<MeetingViewMode>('gallery')
+  const [focusedTarget, setFocusedTarget] = useState<FocusedTarget | null>(null)
+  const prevScreenCountRef = useRef(0)
 
   const [panelOpen, setPanelOpen] = useState(false)
   const [waitingQueue, setWaitingQueue] = useState<MeetingParticipant[]>([])
@@ -126,6 +144,73 @@ function LiveKitStageInner({
   const [copiedLink, setCopiedLink] = useState(false)
   const [ending, setEnding] = useState(false)
   const [busyControl, setBusyControl] = useState(false)
+
+  // Map of participant identities currently sharing their screen for quick lookup in tiles
+  const screenSharingIdentities = useMemo(
+    () => new Set(screenTracks.map((t) => t.participant.identity)),
+    [screenTracks]
+  )
+
+  /**
+   * Handles automatic LiveKit Screen Share view transitions:
+   * - Starting a screen share (`0 -> >0` tracks) automatically switches to Screen Share View.
+   * - Stopping all screen shares (`>0 -> 0` tracks) automatically returns to Gallery View
+   *   unless the user explicitly focused a participant camera or manually stayed in Gallery.
+   */
+  useEffect(() => {
+    const prevCount = prevScreenCountRef.current
+    const currCount = screenTracks.length
+    prevScreenCountRef.current = currCount
+
+    if (prevCount === 0 && currCount > 0) {
+      setViewMode('screen_share')
+      setFocusedTarget({
+        kind: 'screen',
+        participantIdentity: screenTracks[0].participant.identity,
+      })
+      return
+    }
+
+    if (prevCount > 0 && currCount === 0) {
+      setFocusedTarget((prevTarget) => {
+        if (prevTarget?.kind === 'participant') return prevTarget
+        return null
+      })
+      setViewMode((prevMode) => (prevMode === 'screen_share' ? 'gallery' : prevMode))
+      return
+    }
+
+    // If multiple screen shares existed and the focused screen share stopped while another continues
+    if (
+      currCount > 0 &&
+      viewMode === 'screen_share' &&
+      focusedTarget?.kind === 'screen' &&
+      !screenTracks.some((t) => t.participant.identity === focusedTarget.participantIdentity)
+    ) {
+      setFocusedTarget({
+        kind: 'screen',
+        participantIdentity: screenTracks[0].participant.identity,
+      })
+    }
+  }, [screenTracks, viewMode, focusedTarget])
+
+  // Graceful fallback if the focused participant disconnects from the meeting
+  useEffect(() => {
+    if (focusedTarget?.kind !== 'participant') return
+    const stillPresent = cameraTracks.some((t) => t.participant.identity === focusedTarget.participantIdentity)
+    if (!stillPresent) {
+      if (screenTracks.length > 0) {
+        setViewMode('screen_share')
+        setFocusedTarget({
+          kind: 'screen',
+          participantIdentity: screenTracks[0].participant.identity,
+        })
+      } else {
+        setViewMode('gallery')
+        setFocusedTarget(null)
+      }
+    }
+  }, [cameraTracks, screenTracks, focusedTarget])
 
   // Organizer monitors waiting queue and participant IDs for admission/removal
   useEffect(() => {
@@ -155,6 +240,64 @@ function LiveKitStageInner({
       supabase.removeChannel(ch)
     }
   }, [isOrganizer, meetingId])
+
+  /** Focuses any participant camera tile into the main stage without dropping media tracks. */
+  const handleSelectParticipant = (participantIdentity: string) => {
+    setFocusedTarget({ kind: 'participant', participantIdentity })
+    setViewMode('focus')
+  }
+
+  /** Returns any active shared screen (or first active screen share) to the primary stage. */
+  const handleSelectScreenShare = (participantIdentity?: string) => {
+    const targetTrack = participantIdentity
+      ? screenTracks.find((t) => t.participant.identity === participantIdentity) ?? screenTracks[0]
+      : screenTracks[0]
+    if (!targetTrack) return
+    setFocusedTarget({
+      kind: 'screen',
+      participantIdentity: targetTrack.participant.identity,
+    })
+    setViewMode('screen_share')
+  }
+
+  /** Handles clicks on the 3 header view controls: Focus, Gallery, and Screen Share. */
+  const handleSwitchViewMode = (nextMode: MeetingViewMode) => {
+    if (nextMode === 'gallery') {
+      setViewMode('gallery')
+      return
+    }
+
+    if (nextMode === 'screen_share') {
+      if (screenTracks.length > 0) {
+        handleSelectScreenShare(
+          focusedTarget?.kind === 'screen' ? focusedTarget.participantIdentity : undefined
+        )
+      }
+      return
+    }
+
+    // Switching to Focus View: preserve focused participant if still present, else pick speaker / remote / local
+    if (
+      focusedTarget?.kind === 'participant' &&
+      cameraTracks.some((t) => t.participant.identity === focusedTarget.participantIdentity)
+    ) {
+      setViewMode('focus')
+      return
+    }
+
+    const activeSpeakerTrack =
+      cameraTracks.find((t) => t.participant.isSpeaking && !t.participant.isLocal) ??
+      cameraTracks.find((t) => !t.participant.isLocal) ??
+      cameraTracks[0]
+
+    if (activeSpeakerTrack) {
+      setFocusedTarget({
+        kind: 'participant',
+        participantIdentity: activeSpeakerTrack.participant.identity,
+      })
+      setViewMode('focus')
+    }
+  }
 
   const handleToggleMic = async () => {
     if (busyControl) return
@@ -266,23 +409,42 @@ function LiveKitStageInner({
     }
   }
 
-  const gridColsClass = useMemo(() => {
-    const count = Math.max(1, cameraTracks.length)
-    if (count === 1) return 'grid-cols-1 max-w-4xl mx-auto'
-    if (count === 2) return 'grid-cols-1 md:grid-cols-2'
-    if (count <= 4) return 'grid-cols-1 sm:grid-cols-2'
-    return 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
-  }, [cameraTracks.length])
+  // Resolve primary stage item and sidebar thumbnails when in `screen_share` or `focus` layout
+  const mainScreenTrack =
+    viewMode === 'screen_share' && screenTracks.length > 0
+      ? screenTracks.find(
+          (t) => focusedTarget?.kind === 'screen' && t.participant.identity === focusedTarget.participantIdentity
+        ) ?? screenTracks[0]
+      : null
 
-  const activeScreenShare = screenTracks[0] ?? null
+  const mainParticipantTrack =
+    viewMode === 'focus'
+      ? cameraTracks.find(
+          (t) => focusedTarget?.kind === 'participant' && t.participant.identity === focusedTarget.participantIdentity
+        ) ?? cameraTracks[0] ?? null
+      : null
+
+  // Sidebar displays any non-main screen shares first, followed by remaining participants
+  const sidebarScreenTracks = mainScreenTrack
+    ? screenTracks.filter((t) => t.participant.identity !== mainScreenTrack.participant.identity)
+    : viewMode === 'focus'
+      ? screenTracks
+      : []
+
+  const sidebarParticipantTracks = mainParticipantTrack
+    ? cameraTracks.filter((t) => t.participant.identity !== mainParticipantTrack.participant.identity)
+    : cameraTracks
+
+  const hasSidebarItems = sidebarScreenTracks.length > 0 || sidebarParticipantTracks.length > 0
+  const hasActiveScreenShare = screenTracks.length > 0
 
   return (
     <div className="h-[100dvh] w-full bg-[#10121A] text-white flex flex-col overflow-hidden">
-      {/* Audio playback renderer for all remote tracks */}
+      {/* Persistent audio renderer across all view transitions */}
       <RoomAudioRenderer />
 
-      {/* Top Bar */}
-      <header className="px-4 sm:px-6 py-3 bg-[#151824]/95 border-b border-white/10 flex items-center justify-between gap-3 shrink-0">
+      {/* Top Header + View Switcher */}
+      <header className="px-3 sm:px-6 py-2.5 bg-[#151824]/95 border-b border-white/10 flex flex-wrap items-center justify-between gap-2.5 shrink-0">
         <div className="flex items-center gap-3 min-w-0">
           <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-[#4749EB] to-[#6163F6] flex items-center justify-center font-display font-extrabold text-sm shrink-0">
             V
@@ -293,7 +455,68 @@ function LiveKitStageInner({
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Dedicated View Switching Controls: Focus, Gallery, Screen Share */}
+        <nav
+          aria-label="Meeting layout views"
+          className="order-3 md:order-2 w-full md:w-auto flex items-center justify-center gap-1 p-1 rounded-full bg-white/6 border border-white/10"
+        >
+          <button
+            type="button"
+            onClick={() => handleSwitchViewMode('focus')}
+            className={cn(
+              'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer',
+              viewMode === 'focus'
+                ? 'bg-[#4D4CEF] text-white shadow-sm'
+                : 'text-white/75 hover:text-white hover:bg-white/10'
+            )}
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+            <span>Focus View</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSwitchViewMode('gallery')}
+            className={cn(
+              'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all cursor-pointer',
+              viewMode === 'gallery'
+                ? 'bg-[#4D4CEF] text-white shadow-sm'
+                : 'text-white/75 hover:text-white hover:bg-white/10'
+            )}
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+            <span>Gallery View</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleSwitchViewMode('screen_share')}
+            disabled={!hasActiveScreenShare}
+            title={
+              hasActiveScreenShare
+                ? 'Switch to Screen Share View'
+                : 'Screen Share View unlocks when someone shares their screen'
+            }
+            className={cn(
+              'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all',
+              !hasActiveScreenShare && 'opacity-45 cursor-not-allowed text-white/50',
+              hasActiveScreenShare && 'cursor-pointer',
+              viewMode === 'screen_share'
+                ? 'bg-[#4D4CEF] text-white shadow-sm'
+                : hasActiveScreenShare
+                  ? 'text-emerald-300 hover:text-white hover:bg-white/10'
+                  : ''
+            )}
+          >
+            <MonitorUp className="h-3.5 w-3.5" />
+            <span>Screen Share View</span>
+            {hasActiveScreenShare && (
+              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            )}
+          </button>
+        </nav>
+
+        <div className="order-2 md:order-3 flex items-center gap-2">
           <StartAudio
             label="Enable Room Audio"
             className="px-3 py-1.5 rounded-full bg-amber-500 text-black text-xs font-bold"
@@ -332,80 +555,88 @@ function LiveKitStageInner({
         </div>
       </header>
 
-      {/* Stage + Optional Participants Panel */}
+      {/* Primary Stage + Right-Side/Bottom Participant Sidebar + Optional Participants Drawer */}
       <div className="flex-1 min-h-0 flex relative overflow-hidden">
-        <div className="flex-1 min-w-0 p-3 sm:p-5 overflow-y-auto flex flex-col gap-4">
-          {/* Screen Share Spotlight */}
-          {activeScreenShare && (
-            <div className="relative rounded-3xl overflow-hidden bg-black border border-[#4D4CEF]/50 min-h-[260px] sm:min-h-[380px] flex-1">
-              <VideoTrack trackRef={activeScreenShare} className="w-full h-full object-contain" />
-              <div className="absolute bottom-3 left-3 px-3 py-1 rounded-full bg-black/75 backdrop-blur-md text-xs font-semibold border border-white/15">
-                {activeScreenShare.participant.name || activeScreenShare.participant.identity} is sharing their screen
+        <div className="flex-1 min-w-0 min-h-0 p-3 sm:p-4 flex flex-col overflow-hidden">
+          {viewMode === 'gallery' ? (
+            /* Collage Gallery Mode: responsive balanced grid across all connected participants */
+            <div className="flex-1 min-h-0 overflow-y-auto pr-0.5 flex flex-col">
+              <div className={cn('grid gap-3 w-full', getGalleryGridClass(cameraTracks.length))}>
+                {cameraTracks.map((trackRef) => (
+                  <MeetingParticipantTile
+                    key={`gallery-${trackRef.participant.identity}`}
+                    trackRef={trackRef}
+                    variant="gallery"
+                    isSharingScreen={screenSharingIdentities.has(trackRef.participant.identity)}
+                    onSelect={() => handleSelectParticipant(trackRef.participant.identity)}
+                    onJumpToScreenShare={
+                      screenSharingIdentities.has(trackRef.participant.identity)
+                        ? () => handleSelectScreenShare(trackRef.participant.identity)
+                        : undefined
+                    }
+                  />
+                ))}
               </div>
             </div>
-          )}
+          ) : (
+            /* Focus / Screen Share Layout: large main stage + scrollable participant sidebar */
+            <div className="flex-1 min-h-0 flex flex-col lg:flex-row gap-3 overflow-hidden">
+              {/* Main Large Viewing Area */}
+              <div className="flex-1 min-w-0 min-h-0 flex items-center justify-center">
+                {mainScreenTrack ? (
+                  <MeetingScreenShareTile
+                    key={`main-screen-${mainScreenTrack.participant.identity}`}
+                    trackRef={mainScreenTrack}
+                    variant="main"
+                    isSelected
+                  />
+                ) : mainParticipantTrack ? (
+                  <MeetingParticipantTile
+                    key={`main-cam-${mainParticipantTrack.participant.identity}`}
+                    trackRef={mainParticipantTrack}
+                    variant="main"
+                    isSelected
+                    isSharingScreen={screenSharingIdentities.has(mainParticipantTrack.participant.identity)}
+                    onJumpToScreenShare={
+                      screenSharingIdentities.has(mainParticipantTrack.participant.identity)
+                        ? () => handleSelectScreenShare(mainParticipantTrack.participant.identity)
+                        : undefined
+                    }
+                  />
+                ) : null}
+              </div>
 
-          {/* Camera Tiles Grid */}
-          <div
-            className={cn(
-              'grid gap-3 w-full',
-              activeScreenShare ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-4' : cn('flex-1 items-stretch', gridColsClass)
-            )}
-          >
-            {cameraTracks.map((trackRef) => {
-              const p = trackRef.participant
-              const displayName = p.name || p.identity
-              const isLocal = p.isLocal
-              const roleType = parseParticipantRole(p)
-              const hasLiveVideo =
-                isTrackReference(trackRef) && Boolean(trackRef.publication) && !trackRef.publication.isMuted
-
-              return (
-                <div
-                  key={p.identity}
-                  className={cn(
-                    'relative rounded-2xl sm:rounded-3xl overflow-hidden bg-[#1A1E2E] border border-white/10 flex items-center justify-center',
-                    activeScreenShare ? 'min-h-[130px]' : 'min-h-[200px] sm:min-h-[240px]'
-                  )}
+              {/* Vertical Desktop Sidebar / Compact Horizontal Mobile & Tablet Strip */}
+              {hasSidebarItems && (
+                <aside
+                  aria-label="Participant thumbnails"
+                  className="lg:w-72 xl:w-80 shrink-0 min-h-0 flex flex-row lg:flex-col gap-2.5 overflow-x-auto lg:overflow-x-hidden lg:overflow-y-auto pb-1 lg:pb-0 lg:pr-1"
                 >
-                  {hasLiveVideo && isTrackReference(trackRef) ? (
-                    <VideoTrack
-                      trackRef={trackRef}
-                      className={cn('w-full h-full object-cover', isLocal && 'scale-x-[-1]')}
+                  {sidebarScreenTracks.map((screenTrack) => (
+                    <MeetingScreenShareTile
+                      key={`side-screen-${screenTrack.participant.identity}`}
+                      trackRef={screenTrack}
+                      variant="sidebar"
+                      onSelect={() => handleSelectScreenShare(screenTrack.participant.identity)}
                     />
-                  ) : (
-                    <div className="flex flex-col items-center gap-2 p-4">
-                      <Avatar name={displayName} size="lg" shape="circle" className="ring-4 ring-white/10" />
-                      <span className="text-[11px] text-white/60">Camera off</span>
-                    </div>
-                  )}
+                  ))}
 
-                  {/* Bottom Name & Mic Pill */}
-                  <div className="absolute bottom-2.5 left-2.5 right-2.5 flex items-center justify-between gap-2 pointer-events-none">
-                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/65 backdrop-blur-md border border-white/15 max-w-[80%]">
-                      <span className="text-xs font-semibold text-white truncate">
-                        {displayName}
-                        {isLocal ? ' (You)' : ''}
-                      </span>
-                      <RoleTag type={roleType} />
-                    </div>
-
-                    <span
-                      className={cn(
-                        'h-7 w-7 rounded-full flex items-center justify-center shrink-0',
-                        p.isMicrophoneEnabled ? 'bg-[#4D4CEF] text-white' : 'bg-rose-500 text-white'
-                      )}
-                    >
-                      {p.isMicrophoneEnabled ? <Mic className="h-3.5 w-3.5" /> : <MicOff className="h-3.5 w-3.5" />}
-                    </span>
-                  </div>
-                </div>
-              )
-            })}
-          </div>
+                  {sidebarParticipantTracks.map((trackRef) => (
+                    <MeetingParticipantTile
+                      key={`side-cam-${trackRef.participant.identity}`}
+                      trackRef={trackRef}
+                      variant="sidebar"
+                      isSharingScreen={screenSharingIdentities.has(trackRef.participant.identity)}
+                      onSelect={() => handleSelectParticipant(trackRef.participant.identity)}
+                    />
+                  ))}
+                </aside>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Participants Side Panel */}
+        {/* Participants Side Drawer (Invite Links + Waiting Room Approvals + Participant List) */}
         {panelOpen && (
           <aside className="absolute inset-y-0 right-0 z-20 w-80 max-w-full lg:static bg-[#161926] border-l border-white/10 flex flex-col">
             <div className="px-4 py-3.5 border-b border-white/10 flex items-center justify-between">
@@ -486,16 +717,24 @@ function LiveKitStageInner({
                 </div>
               )}
 
-              {/* Connected Participants List */}
+              {/* Connected Participants List (clicking focuses participant immediately) */}
               <div className="space-y-2">
                 <p className="text-[11px] font-bold uppercase tracking-wider text-white/50">In This Meeting</p>
                 {participants.map((p) => {
                   const roleType = parseParticipantRole(p)
                   const dbRow = dbParticipants.find((row) => row.participant_identity === p.identity)
+                  const isFocusedParticipant =
+                    viewMode === 'focus' && focusedTarget?.kind === 'participant' && focusedTarget.participantIdentity === p.identity
                   return (
                     <div
                       key={p.identity}
-                      className="p-2.5 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-between gap-2"
+                      onClick={() => handleSelectParticipant(p.identity)}
+                      className={cn(
+                        'p-2.5 rounded-2xl border flex items-center justify-between gap-2 cursor-pointer transition-colors',
+                        isFocusedParticipant
+                          ? 'bg-[#4D4CEF]/20 border-[#6163F6]/60'
+                          : 'bg-white/5 border-white/10 hover:bg-white/10'
+                      )}
                     >
                       <div className="flex items-center gap-2.5 min-w-0">
                         <Avatar name={p.name || p.identity} size="sm" shape="circle" />
@@ -511,6 +750,9 @@ function LiveKitStageInner({
                       </div>
 
                       <div className="flex items-center gap-1.5 shrink-0">
+                        {screenSharingIdentities.has(p.identity) && (
+                          <MonitorUp className="h-3.5 w-3.5 text-emerald-400" />
+                        )}
                         {p.isMicrophoneEnabled ? (
                           <Mic className="h-3.5 w-3.5 text-indigo-300" />
                         ) : (
@@ -519,7 +761,10 @@ function LiveKitStageInner({
                         {isOrganizer && !p.isLocal && dbRow && (
                           <button
                             type="button"
-                            onClick={() => handleRemoveParticipant(dbRow.id)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleRemoveParticipant(dbRow.id)
+                            }}
                             title="Remove participant"
                             className="p-1 rounded-full hover:bg-rose-500/20 text-white/60 hover:text-rose-300 cursor-pointer"
                           >
@@ -536,8 +781,8 @@ function LiveKitStageInner({
         )}
       </div>
 
-      {/* Bottom Controls Bar */}
-      <footer className="px-4 py-3.5 bg-[#151824]/95 border-t border-white/10 flex flex-wrap items-center justify-center gap-2.5 sm:gap-3 shrink-0">
+      {/* Consistent Bottom Controls Bar Across All Layouts */}
+      <footer className="px-4 py-3 bg-[#151824]/95 border-t border-white/10 flex flex-wrap items-center justify-center gap-2.5 sm:gap-3 shrink-0">
         <button
           type="button"
           onClick={handleToggleMic}
