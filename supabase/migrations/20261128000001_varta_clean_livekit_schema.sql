@@ -258,6 +258,21 @@ create index meeting_invitations_email_idx on public.meeting_invitations (invite
 create index meeting_participants_meeting_idx on public.meeting_participants (meeting_id);
 create index meeting_participants_user_idx on public.meeting_participants (user_id);
 
+create schema if not exists private;
+grant usage on schema private to authenticated, service_role;
+
+create or replace function private.touch_updated_at()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
 create trigger touch_profiles_updated_at
   before update on public.profiles
   for each row execute function private.touch_updated_at();

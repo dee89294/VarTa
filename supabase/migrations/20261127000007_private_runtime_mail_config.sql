@@ -6,6 +6,22 @@
 --   - `EXECUTE` on `public.get_smtp_runtime_config()` is revoked from `PUBLIC`, `anon`, and `authenticated`
 --     and granted exclusively to `service_role`.
 
+create schema if not exists private;
+revoke all on schema private from public, anon;
+grant usage on schema private to authenticated, service_role;
+
+create or replace function private.touch_updated_at()
+returns trigger
+language plpgsql
+security invoker
+set search_path = ''
+as $$
+begin
+  new.updated_at = now();
+  return new;
+end;
+$$;
+
 create table if not exists private.runtime_mail_config (
   id smallint primary key default 1 check (id = 1),
   app_url text not null default 'http://localhost:5173',

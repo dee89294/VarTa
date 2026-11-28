@@ -61,8 +61,8 @@ VarTa/
 │       ├── MyMeetingsPage.tsx         # Manage hosted & invited meetings (`/my-meetings`)
 │       └── MeetingRoomPage.tsx        # Pre-join gate, waiting room, and LiveKit room stage
 └── supabase/
-    ├── migrations/                    # Ordered PostgreSQL migration history
-    │   ├── 20261126*–20261127*        # Legacy initial schema & runtime SMTP vault setup
+    ├── migrations/                    # Clean PostgreSQL schema, Vault SMTP, and LiveKit schema
+    │   ├── 20261127000007_private_runtime_mail_config.sql
     │   ├── 20261128000001_varta_clean_livekit_schema.sql
     │   └── 20261128000002_sync_vault_smtp_from_backup.sql
     └── functions/
